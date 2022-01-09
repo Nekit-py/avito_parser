@@ -4,6 +4,7 @@ certifi==2021.5.30
 charset-normalizer==2.0.4
 curtsies==0.3.5
 cwcwidth==0.1.4
+fake-useragent==0.1.11
 GDAL==3.3.3
 greenlet==1.1.1
 idna==3.2
