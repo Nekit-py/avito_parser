@@ -1,11 +1,30 @@
+import json
 import requests
 from bs4 import BeautifulSoup as bs
 import asyncio
 from pprint import pprint
 import logging
-from fake_useragent import UserAgent
+# from fake_useragent import UserAgent
 # from fake_useragent import UserAgent
 # from requests_html import HTMLSession
+
+
+class ToManyRequests(BaseException):
+    """
+    Кастомное исключение, которое дает понять, что мы отправили слишком много запрозов
+    и нас не надолго забанили)
+    """
+    def __init__(self, *args):
+        if args:
+            self.message = args[0]
+        else:
+            self.message = None
+
+    def __str__(self):
+        if self.message:
+            return f"Reuqests error: {self.message}"
+        else:
+            return "Нас немножко забанили)"
 
 
 class Avito:
@@ -16,28 +35,30 @@ class Avito:
         # self.ua = UserAgent()
 
     async def get_html(self, url):
-        # logger.info(self.ua.chrome)
         response = requests.get(url)
-        return response.text
+        if response.status_code == 429:
+            raise ToManyRequests
+        else:
+            return response.text
 
-    async def get_all_pages_links(self):
+    async def get_all_pages_links(self) -> tuple[str]:
         """
         Берем номера страниц из пагинации и добавляем к каждоый ссылке.
         Вормирвуем список ссылок
         :return:
         """
         html = await self.get_html(self.base_url)
-        logging.info(html)
+        # logging.info(type(html))
         soup = bs(html, "lxml")
         pagination = [page.text for page in soup.find_all(class_="pagination-item-JJq_j")]
-        logging.info(f"{pagination=}")
         pagination_interval = [int(pagination[i]) for i in (1, -2)]
         #Костыль, надо попровить!)
         pagination_interval[1] += 1
-        all_pages_links = [f"{self.base_url}&p={page}" for page in range(*pagination_interval)]
+        #Тестируем на небольшом пуле страниц, пока не поймем как сделать так, чтобы нас не банили)
+        all_pages_links = (f"{self.base_url}&p={page}" for page in range(1, 2))
         return all_pages_links
 
-    async def get_page_links(self, url):
+    async def get_page_links(self, url) -> tuple[str]:
         """
         Получаем список ссылок объявлений для каждой странице
         :param url:
@@ -52,7 +73,7 @@ class Avito:
         links = tuple(link.a.get("href") for link in ads)
         return links
 
-    async def get_link_data(self, link):
+    async def get_link_data(self, link) -> dict:
         """
         Получаем данные из объявления
         :param link:
@@ -75,19 +96,28 @@ class Avito:
             'link': link,
         }
 
-        pprint(data)
         return data
 
+    @staticmethod
+    def to_json(data):
+        with open("data.json", 'a') as file:
+            json_data = json.dumps(data)
+            file.write(json_data)
 
-async def main():
+
+async def main() -> None:
     a = Avito()
     all_pages_links = await a.get_all_pages_links()
-    pprint(all_pages_links)
-    page_links_tasks = [await a.get_page_links(link) for link in all_pages_links]
+    page_links_tasks = (asyncio.create_task(a.get_page_links(link)) for link in all_pages_links)
     page_links = await asyncio.gather(*page_links_tasks)
-    pprint(page_links)
+    ads_links = ("".join(("https://www.avito.ru", url)) for page in page_links for url in page)
+    ads_data_tasks = [asyncio.create_task(a.get_link_data(ad_link)) for ad_link in ads_links]
+    all_ads_data = await asyncio.gather(*ads_data_tasks)
+    a.to_json(all_ads_data)
+
 
 if __name__ == "__main__":
     logging.basicConfig(level="INFO")
     logger = logging.getLogger("Avito parser")
-    asyncio.run(main())
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(main())
