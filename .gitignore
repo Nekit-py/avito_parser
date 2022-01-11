@@ -1,3 +1,5 @@
 env
 __pycache__
 1.txt
+data.json
+test.py
